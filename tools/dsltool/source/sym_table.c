@@ -174,6 +174,8 @@ int sym_table_save_to_file(FILE *f)
     uint32_t offset = sizeof(dsl_symbol_table)
                     + sizeof(dsl_symbol) * elf_symbols_num;
 
+    bool symbols_not_found = false;
+
     for (size_t i = 0; i < elf_symbols_num; i++)
     {
         dsl_symbol sym = {
@@ -213,6 +215,8 @@ int sym_table_save_to_file(FILE *f)
                 else
                 {
                     ERROR("Symbol not found in external ELFs: [%s]\n", sym_name);
+                    symbols_not_found = true;
+                    continue;
                 }
                 return -1;
             }
@@ -232,6 +236,9 @@ int sym_table_save_to_file(FILE *f)
             return -1;
         }
     }
+
+    if (symbols_not_found)
+        return -1;
 
     for (size_t i = 0; i < elf_symbols_num; i++)
     {
