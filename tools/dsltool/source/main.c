@@ -10,7 +10,7 @@
 #include "elf.h"
 #include "dsl.h"
 #include "log.h"
-#include "main_binary.h"
+#include "external_elf.h"
 #include "sym_table.h"
 
 // Useful commands to analyze ELF files:
@@ -23,13 +23,15 @@
 
 void usage(void)
 {
-    INFO("Usage: dsltool -i input.elf -o output.dsl [-m main_binary.elf] [-v]\n"
+    INFO("Usage: dsltool -i input.elf -o output.dsl [-m main_binary.elf] [-d dep.elf ...] [-v]\n"
          "\n"
-         "  -i input.elf       ELF file of the dynamic library.\n"
-         "  -o output.dsl      Path to DSL file to be created.\n"
-         "  -m main_binary.elf Optional main binary ELF file to resolve symbols\n"
-         "  -v                 Enable verbose logging\n"
-         "  -V                 Print version string and exit\n"
+         "  -i input.elf           ELF file of the dynamic library.\n"
+         "  -o output.dsl          Path to DSL file to be created.\n"
+         "  -m main_binary.elf     Optional main binary ELF file to resolve symbols\n"
+         "  -d dep.elf             Optional dependency ELF file(s) to resolve symbols\n"
+         "                         (can be specified multiple times)\n"
+         "  -v                     Enable verbose logging\n"
+         "  -V                     Print version string and exit\n"
     );
 }
 
@@ -57,6 +59,8 @@ int main(int argc, char *argv[])
     const char *in_file = NULL;
     const char *out_file = NULL;
     const char *main_binary_file = NULL;
+    const char **dep_elfs = NULL;
+    int num_dep_elfs = 0;
 
     for (int i = 1; i < argc; i++)
     {
@@ -78,6 +82,24 @@ int main(int argc, char *argv[])
             if (i < argc)
                 main_binary_file = argv[i];
         }
+        else if (strcmp(argv[i], "-d") == 0)
+        {
+            i++;
+            if (i < argc)
+            {
+                // Allocate space for new dependency ELF
+                const char **new_deps = realloc(dep_elfs,
+                                                sizeof(const char *) * (num_dep_elfs + 1));
+                if (new_deps == NULL)
+                {
+                    ERROR("Memory allocation failed\n");
+                    return -1;
+                }
+                dep_elfs = new_deps;
+                dep_elfs[num_dep_elfs] = argv[i];
+                num_dep_elfs++;
+            }
+        }
         else if (strcmp(argv[i], "-h") == 0)
         {
             usage();
@@ -91,6 +113,7 @@ int main(int argc, char *argv[])
         {
             ERROR("Unknown argument: %s\n", argv[i]);
             usage();
+            free(dep_elfs);
             return -1;
         }
     }
@@ -99,6 +122,7 @@ int main(int argc, char *argv[])
     {
         ERROR("No input file provided\n");
         usage();
+        free(dep_elfs);
         return -1;
     }
 
@@ -106,10 +130,11 @@ int main(int argc, char *argv[])
     {
         ERROR("No output file provided\n");
         usage();
+        free(dep_elfs);
         return -1;
     }
 
-    VERBOSE("\n"
+        VERBOSE("\n"
             "Loading main ELF\n"
             "----------------\n"
             "\n");
@@ -120,8 +145,37 @@ int main(int argc, char *argv[])
     }
     else
     {
-        // Load symbols and their addresses from the main ELF
-        main_binary_load(main_binary_file);
+        if (external_elf_load(main_binary_file) != 0)
+        {
+            ERROR("Failed to load main binary ELF: %s\n", main_binary_file);
+            free(dep_elfs);
+            return -1;
+        }
+    }
+
+    VERBOSE("\n"
+            "Loading dependency ELFs\n"
+            "------------------------\n"
+            "\n");
+
+    if (num_dep_elfs == 0)
+    {
+        INFO("No dependency ELFs provided. Skipping.\n");
+    }
+    else
+    {
+        INFO("Loading %d dependency ELF(s)...\n", num_dep_elfs);
+
+        for (int i = 0; i < num_dep_elfs; i++)
+        {
+            if (external_elf_load(dep_elfs[i]) != 0)
+            {
+                ERROR("Failed to load dependency ELF: %s\n", dep_elfs[i]);
+                external_elf_free_all();
+                free(dep_elfs);
+                return -1;
+            }
+        }
     }
 
     VERBOSE("\n"
@@ -137,7 +191,8 @@ int main(int argc, char *argv[])
     if (hdr == NULL)
     {
         ERROR("Failed to open: %s\n", in_file);
-        main_binary_free();
+        external_elf_free_all();
+        free(dep_elfs);
         return -1;
     }
 
@@ -322,8 +377,28 @@ int main(int argc, char *argv[])
     {
         ERROR("Failed to open output file: %s\n", out_file);
         free(hdr);
-        main_binary_free();
+        external_elf_free_all();
+        free(dep_elfs);
         return -1;
+    }
+
+    // Get just the filenames for the dependency list
+    const char **dep_filenames = malloc(num_dep_elfs * sizeof(char *));
+    if (dep_filenames == NULL && num_dep_elfs > 0)
+    {
+        ERROR("Memory allocation failed\n");
+        external_elf_free_all();
+        free(dep_elfs);
+        fclose(f_dsl);
+        return -1;
+    }
+
+    for (int i = 0; i < num_dep_elfs; i++)
+    {
+        const char *last_slash = strrchr(dep_elfs[i], '/');
+        const char *last_bslash = strrchr(dep_elfs[i], '\\');
+        const char *sep = (last_slash > last_bslash) ? last_slash : last_bslash;
+        dep_filenames[i] = sep ? sep + 1 : dep_elfs[i];
     }
 
     // Write header
@@ -332,7 +407,8 @@ int main(int argc, char *argv[])
         .magic = DSL_MAGIC,
         .version = 0,
         .num_sections = read_sections,
-        .unused = {0},
+        .num_deps = (uint8_t)num_dep_elfs,
+        .unused = 0,
         .addr_space_size = max_address,
     };
 
@@ -529,6 +605,18 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Write dependency names (NUL-terminated strings)
+    for (int i = 0; i < num_dep_elfs; i++)
+    {
+        size_t len = strlen(dep_filenames[i]) + 1;
+        if (fwrite(dep_filenames[i], len, 1, f_dsl) != 1)
+        {
+            ERROR("Failed to write dependency name: %s\n", dep_filenames[i]);
+            goto error;
+        }
+    }
+    free(dep_filenames);
+
     // Save symbol table to file
 
     VERBOSE("Saving symbol table...\n");
@@ -549,13 +637,15 @@ int main(int argc, char *argv[])
             "\n");
 
     free(hdr);
-    main_binary_free();
+    external_elf_free_all();
+    free(dep_elfs);
 
     return 0;
 
 error:
     free(hdr);
-    main_binary_free();
+    external_elf_free_all();
+    free(dep_elfs);
     fclose(f_dsl);
     remove(out_file);
     return -1;

@@ -30,6 +30,8 @@
 ///     +----------------------+
 ///     | Section data 2       |
 ///     +======================+
+///     | Dependencies         | NUL-terminated dependency DSL filenames.
+///     +======================+
 ///     | Symbol table         |
 ///     +----------------------+
 ///     | Symbol table names   |
@@ -46,7 +48,9 @@
 ///     +--------------------+-------------+--------------------------------+
 ///     | Number of sections | uint8_t     |                                |
 ///     +--------------------+-------------+--------------------------------+
-///     | Unused             | uint8_t[2]  | Unused, set to zero.           |
+///     | Number of deps     | uint8_t     | Number of dependent DSL files  |
+///     +--------------------+-------------+--------------------------------+
+///     | Unused             | uint8_t     | Unused, set to zero.           |
 ///     +--------------------+-------------+--------------------------------+
 ///     | Address space size | uint32_t    | From 0 to the max address.     |
 ///     +====================+=============+================================+
@@ -90,7 +94,8 @@ typedef struct {
     uint32_t magic;             ///< Magic number: DSL_MAGIC
     uint8_t version;            ///< Version number (currently 0)
     uint8_t num_sections;       ///< Number of sections in the file
-    uint8_t unused[2];          ///< Unused. Set to zero
+    uint8_t num_deps; // Number of DSLs we depend on
+    uint8_t unused;          ///< Unused. Set to zero
     uint32_t addr_space_size;   ///< Size of the address space used by the DSL file
     dsl_section_header section[]; ///< Array of section headers
 } dsl_header;
@@ -122,7 +127,7 @@ static_assert(sizeof(dsl_header) == 12);
 /// This is followed by a series of NUL-terminated strings (the symbol names).
 
 #define DSL_SYMBOL_PUBLIC       1 ///< If not set, the symbol is private
-#define DSL_SYMBOL_MAIN_BINARY  2 ///< If set, the symbol is in the main binary
+#define DSL_SYMBOL_EXTERNAL     2 ///< If set, the symbol is external (main binary or dependency)
 
 /// DSL symbol
 typedef struct {

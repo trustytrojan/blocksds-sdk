@@ -10,7 +10,7 @@
 
 #include "dsl.h"
 #include "log.h"
-#include "main_binary.h"
+#include "external_elf.h"
 
 typedef struct {
     const char *name;
@@ -190,33 +190,37 @@ int sym_table_save_to_file(FILE *f)
         }
         else if (elf_symbols[i].unknown)
         {
-            // If this symbol is unknown look for it in the main binary and edit
-            // the symbol to define the address.
+            // If this symbol is unknown, look for it in loaded external ELFs.
 
             const char *sym_name = sym_get_name(i);
             VERBOSE("Unknown symbol [%s]\n", sym_name);
 
-            // Look for the symbol in the main binary
-            if (!main_binary_is_loaded())
+            uint32_t sym_addr = UINT32_MAX;
+
+            if (external_elf_is_loaded())
             {
-                ERROR("No main binary provided. Can't resolve address for [%s]\n",
-                      sym_name);
-                return -1;
+                VERBOSE("Searching external ELFs...\n");
+                sym_addr = external_elf_get_symbol_value(sym_name);
             }
 
-            VERBOSE("Searching main binary...\n");
-
-            uint32_t sym_addr = main_binary_get_symbol_value(sym_name);
             if (sym_addr == UINT32_MAX)
             {
-                ERROR("Symbol not found: [%s]\n", sym_name);
+                if (!external_elf_is_loaded())
+                {
+                    ERROR("No external ELF provided. Can't resolve address for [%s]\n",
+                          sym_name);
+                }
+                else
+                {
+                    ERROR("Symbol not found in external ELFs: [%s]\n", sym_name);
+                }
                 return -1;
             }
 
             VERBOSE("Symbol found: 0x%08X\n", sym_addr);
 
             sym.value = sym_addr;
-            sym.attributes |= DSL_SYMBOL_MAIN_BINARY;
+            sym.attributes |= DSL_SYMBOL_EXTERNAL;
         }
 
         // Allocate space for this name
