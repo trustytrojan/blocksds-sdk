@@ -398,7 +398,16 @@ int main(int argc, char *argv[])
         const char *last_slash = strrchr(dep_elfs[i], '/');
         const char *last_bslash = strrchr(dep_elfs[i], '\\');
         const char *sep = (last_slash > last_bslash) ? last_slash : last_bslash;
-        dep_filenames[i] = sep ? sep + 1 : dep_elfs[i];
+        const char *path = sep ? sep + 1 : dep_elfs[i];
+        const char *const basename = strdup(sep ? sep + 1 : path);
+        char *const dot = strrchr(basename, '.');
+        if (dot != NULL)
+        {
+            // Ensure we only strip the extension of the filename, 
+            // not a dot that might be in a directory name.
+            *dot = '\0';
+        }
+        dep_filenames[i] = basename;
     }
 
     // Write header
