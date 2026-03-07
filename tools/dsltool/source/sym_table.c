@@ -174,7 +174,8 @@ int sym_table_save_to_file(FILE *f)
     uint32_t offset = sizeof(dsl_symbol_table)
                     + sizeof(dsl_symbol) * elf_symbols_num;
 
-    bool symbols_not_found = false;
+    const char **missing_symbols = NULL;
+    int missing_symbols_count = 0;
 
     for (size_t i = 0; i < elf_symbols_num; i++)
     {
@@ -214,8 +215,9 @@ int sym_table_save_to_file(FILE *f)
                 }
                 else
                 {
-                    ERROR("Symbol not found in external ELFs: [%s]\n", sym_name);
-                    symbols_not_found = true;
+                    // ERROR("Symbol not found in external ELFs: [%s]\n", sym_name);
+                    missing_symbols = realloc(missing_symbols, sizeof(char *) * (missing_symbols_count + 1));
+                    missing_symbols[missing_symbols_count++] = sym_name;
                     continue;
                 }
                 return -1;
@@ -237,8 +239,15 @@ int sym_table_save_to_file(FILE *f)
         }
     }
 
-    if (symbols_not_found)
+    if (missing_symbols_count > 0)
+    {
+        ERROR("Symbols not found in external ELFS:");
+        for (int i = 0; i < missing_symbols_count; ++i)
+            ERROR(" %s", missing_symbols[i]);
+        ERROR("\n");
+        free(missing_symbols);
         return -1;
+    }
 
     for (size_t i = 0; i < elf_symbols_num; i++)
     {
