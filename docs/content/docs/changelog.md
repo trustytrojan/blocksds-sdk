@@ -3,6 +3,43 @@ title: 'Changelog'
 weight: 6
 ---
 
+### Version 1.18.1 (2026-03-07)
+
+- libnds:
+
+  - Replace some instances of `__attribute__()` by defines. The defines are
+    empty when IntelliSense reads the headers, which allows it to run without
+    errors.
+  - Refactor a lot of the filesystem-related code to make it more modular.
+  - Check if some functions (`unlink()`, `rmdir()`, `mkdir()`, `rename()`) are
+    called with a NitroFS path and fail in that case.
+  - Some updates for picolibc 1.8.12. @asie
+  - Add placeholders for `clock_gettime()` and `clock_settime()`. They simply
+    return an error, but that's enough for MbedTLS and libcurl to work.
+  - Remove `machine/_types.h`, which is now in picolibc.
+
+- DSWiFi:
+
+  - Allow inlining `htons()` and `htonl()`. Reorganize some headers. @asie
+  - Create `sys/ioctl.h` header so that it gets included before the one of
+    picolibc to prevent function definition conflicts. This header is included
+    from `sys/socket.h` for backwards-compatibility.
+
+- Maxmod:
+
+  - Add `mmStreamVolume()`. @dvdo
+
+- grit:
+
+  - Update documentation (introduction and GRF format sections).
+
+- SDK:
+
+  - The old makefiles prepend the `ASFLAGS`, `CFLAGS` and `CXXFLAGS` provided by
+    the user to the default flags. This meant that the default flags would
+    always override the user-provided flags. Now the user-defined flags are
+    appended to the default flags so that they can override the defaults.
+
 ### Version 1.18.0 (2026-02-22)
 
 - libnds:
@@ -322,7 +359,7 @@ weight: 6
     Gozzard.
   - A new icon has been added to the SDK to be used as default icon for all
     ROMs. The old icon file is still available for projects that depend on it,
-    but it has been updated to use the new icon. Thanks to @DVdo.
+    but it has been updated to use the new icon. Thanks to @dvdo.
   - `dprintf()` and `vdprintf()` have been added to picolibc.
   - Arguments `-std=gnu17` and `-std=gnu++17` have been removed from all default
     and template makefiles. They prevented users from changing this themselves.
