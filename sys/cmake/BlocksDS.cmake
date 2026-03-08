@@ -114,7 +114,8 @@ find_program(CMAKE_RANLIB       ${BLOCKSDS_TRIPLET}-gcc-ranlib HINTS ${TOOLCHAIN
 find_program(CMAKE_STRIP        ${BLOCKSDS_TRIPLET}-strip      HINTS ${TOOLCHAIN_PATH_HINT})
 
 find_program(BLOCKSDS_NDSTOOL NAMES ndstool HINTS "${BLOCKSDS}/tools/ndstool")
-
+find_program(BLOCKSDS_DSLTOOL NAMES dsltool HINTS "${BLOCKSDS}/tools/dsltool")
+find_file(BLOCKSDS_ARM9_DSL_SPECS NAMES ds_arm9_dsl.specs HINTS "$ENV{BLOCKSDS}/sys/crts")
 
 
 # post-link utilities to create NDS rom
@@ -229,4 +230,118 @@ function(nds_create_rom target)
     )
 
     add_custom_target(${target}_nds ALL DEPENDS "${NDSTOOL_OUTPUT}")
+endfunction()
+
+# Utility function to create a DSL library using a static library file built by a CMake STATIC library target.
+#
+# Required:
+# - TARGET: logical name used to create internal build targets
+# - STATIC_TARGET: an existing STATIC library target name used as linker input for the intermediary ELF
+#
+# Optional:
+# - MAIN_TARGET: if provided, uses TARGET_FILE of this CMake target for dsltool -m
+#
+# Outputs:
+# - ${TARGET}_ELF: path to the ELF file
+# - ${TARGET}_DSL: path to the DSL file
+# - ${TARGET}_DSL_TARGET: name of the target that builds the DSL file
+function(blocksds_create_dsl)
+	set(oneValueArgs TARGET STATIC_TARGET MAIN_TARGET)
+	cmake_parse_arguments(CREATE_DSL "" "${oneValueArgs}" "" ${ARGN})
+
+    ## Verify passed arguments.
+	if(NOT CREATE_DSL_TARGET)
+		message(FATAL_ERROR "TARGET is required")
+	endif()
+
+	if(NOT CREATE_DSL_STATIC_TARGET)
+		message(FATAL_ERROR "STATIC_TARGET is required")
+	endif()
+
+	if(NOT TARGET ${CREATE_DSL_STATIC_TARGET})
+		message(FATAL_ERROR "STATIC_TARGET '${CREATE_DSL_STATIC_TARGET}' does not exist")
+	endif()
+
+	get_target_property(_static_target_type ${CREATE_DSL_STATIC_TARGET} TYPE)
+	if(NOT _static_target_type STREQUAL "STATIC_LIBRARY")
+		message(FATAL_ERROR "STATIC_TARGET '${CREATE_DSL_STATIC_TARGET}' must be a STATIC library target")
+	endif()
+
+    # Setup output target name and output file paths.
+	set(_basename "${CREATE_DSL_TARGET}")
+	set(_dsl_target "${CREATE_DSL_TARGET}__dsl")
+	set(_elf "${CMAKE_BINARY_DIR}/${_basename}.elf")
+	set(_dsl "${CMAKE_BINARY_DIR}/${_basename}.dsl")
+
+    # Sanity check the ARM9 DSL specs file
+    if(NOT EXISTS ${BLOCKSDS_ARM9_DSL_SPECS})
+        message(FATAL_ERROR "ds_arm9_dsl.specs not found! Your CMake toolchain file may be broken.")
+    endif()
+
+	## Create a command to link the static library into an ELF for dsltool.
+    # We use CMAKE_CXX_COMPILER as the "linker driver" because g++ will handle both C and C++ linking quirks.
+	add_custom_command(
+		OUTPUT ${_elf}
+		COMMAND ${CMAKE_CXX_COMPILER}
+			-mthumb
+			-mcpu=arm946e-s+nofp
+			-nostdlib
+			-specs=${BLOCKSDS_ARM9_DSL_SPECS}
+			-Wl,--emit-relocs
+			-Wl,--unresolved-symbols=ignore-all
+			-Wl,--nmagic # this removes .text/.data section padding... good
+			-Wl,--target1-abs
+			-Wl,--whole-archive
+			$<TARGET_FILE:${CREATE_DSL_STATIC_TARGET}>
+            -Wl,--no-whole-archive # probably not necessary
+			-o ${_elf}
+		DEPENDS ${CREATE_DSL_STATIC_TARGET}
+		VERBATIM
+	)
+
+    ## Arguments passed to dsltool.
+	set(_dsltool_args -i ${_elf} -o ${_dsl})
+
+    ## Dependencies of the dsltool command.
+    # For now, start with the ELF's existence.
+	set(_dsltool_deps ${_elf})
+	
+	# MAIN_TARGET is optional.
+	# Use it when you want dsltool to resolve symbols against the main binary at build-time.
+	if(CREATE_DSL_MAIN_TARGET)
+		if(NOT TARGET ${CREATE_DSL_MAIN_TARGET})
+			message(FATAL_ERROR "MAIN_TARGET '${CREATE_DSL_MAIN_TARGET}' does not exist")
+		endif()
+
+		list(APPEND _dsltool_args -m $<TARGET_FILE:${CREATE_DSL_MAIN_TARGET}>)
+
+        # Ensure that MAIN_TARGET builds before running dsltool.
+		list(APPEND _dsltool_deps ${CREATE_DSL_MAIN_TARGET})
+	endif()
+
+    # Sanity check for dsltool's existence
+    if(NOT EXISTS "${BLOCKSDS_DSLTOOL}")
+        message(FATAL_ERROR "dsltool not found! Your CMake toolchain file may be broken.")
+    endif()
+
+    ## Create the dsltool command.
+	add_custom_command(
+		OUTPUT ${_dsl}
+		COMMAND ${BLOCKSDS_DSLTOOL} ${_dsltool_args}
+		DEPENDS ${_dsltool_deps}
+		VERBATIM
+	)
+
+	## Create a target containing the above commands that create our DSL.
+    # Add it to the ALL target to build it at the same time as other
+    # libraries/executables, giving the caller no extra work to do.
+	add_custom_target(${_dsl_target} ALL DEPENDS ${_dsl})
+
+    ## Return convenient values to the caller.
+    # Path to the ELF file used to create the DSL.
+	set(${CREATE_DSL_TARGET}_ELF ${_elf} PARENT_SCOPE)
+    # Path to the DSL file.
+	set(${CREATE_DSL_TARGET}_DSL ${_dsl} PARENT_SCOPE)
+    # Name of the DSL target.
+	set(${CREATE_DSL_TARGET}_DSL_TARGET ${_dsl_target} PARENT_SCOPE)
 endfunction()
