@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # SPDX-FileContributor: ds-sloth, 2024
+#                       trustytrojan, 2026
 
 
 cmake_minimum_required(VERSION 3.16)
@@ -235,41 +236,36 @@ endfunction()
 # Utility function to create a DSL library using a static library file built by a CMake STATIC library target.
 #
 # Required:
-# - TARGET: logical name used to create internal build targets
-# - STATIC_TARGET: an existing STATIC library target name used as linker input for the intermediary ELF
+# - DSL_TARGET: an existing STATIC library target name used as linker input for the intermediary ELF
 #
 # Optional:
-# - MAIN_TARGET: if provided, uses TARGET_FILE of this CMake target for dsltool -m
+# - MAIN_TARGET: if provided, uses the ELF of this CMake target for dsltool's -m option
 #
 # Outputs:
 # - ${TARGET}_ELF: path to the ELF file
 # - ${TARGET}_DSL: path to the DSL file
 # - ${TARGET}_DSL_TARGET: name of the target that builds the DSL file
-function(blocksds_create_dsl)
-	set(oneValueArgs TARGET STATIC_TARGET MAIN_TARGET)
+function(blocksds_create_dsl DSL_TARGET)
+	set(oneValueArgs TARGET MAIN_TARGET)
 	cmake_parse_arguments(CREATE_DSL "" "${oneValueArgs}" "" ${ARGN})
 
     ## Verify passed arguments.
-	if(NOT CREATE_DSL_TARGET)
+	if(NOT DSL_TARGET)
 		message(FATAL_ERROR "TARGET is required")
 	endif()
 
-	if(NOT CREATE_DSL_STATIC_TARGET)
-		message(FATAL_ERROR "STATIC_TARGET is required")
+	if(NOT TARGET ${DSL_TARGET})
+		message(FATAL_ERROR "TARGET '${DSL_TARGET}' does not exist")
 	endif()
 
-	if(NOT TARGET ${CREATE_DSL_STATIC_TARGET})
-		message(FATAL_ERROR "STATIC_TARGET '${CREATE_DSL_STATIC_TARGET}' does not exist")
-	endif()
-
-	get_target_property(_static_target_type ${CREATE_DSL_STATIC_TARGET} TYPE)
+	get_target_property(_static_target_type ${DSL_TARGET} TYPE)
 	if(NOT _static_target_type STREQUAL "STATIC_LIBRARY")
-		message(FATAL_ERROR "STATIC_TARGET '${CREATE_DSL_STATIC_TARGET}' must be a STATIC library target")
+		message(FATAL_ERROR "TARGET '${DSL_TARGET}' must be a STATIC library target")
 	endif()
 
     # Setup output target name and output file paths.
-	set(_basename "${CREATE_DSL_TARGET}")
-	set(_dsl_target "${CREATE_DSL_TARGET}__dsl")
+	set(_basename "${DSL_TARGET}")
+	set(_dsl_target "${DSL_TARGET}_dsl")
 	set(_elf "${CMAKE_BINARY_DIR}/${_basename}.elf")
 	set(_dsl "${CMAKE_BINARY_DIR}/${_basename}.dsl")
 
@@ -292,10 +288,10 @@ function(blocksds_create_dsl)
 			-Wl,--nmagic # this removes .text/.data section padding... good
 			-Wl,--target1-abs
 			-Wl,--whole-archive
-			$<TARGET_FILE:${CREATE_DSL_STATIC_TARGET}>
+			$<TARGET_FILE:${DSL_TARGET}>
             -Wl,--no-whole-archive # probably not necessary
 			-o ${_elf}
-		DEPENDS ${CREATE_DSL_STATIC_TARGET}
+		DEPENDS ${DSL_TARGET}
 		VERBATIM
 	)
 
@@ -339,9 +335,9 @@ function(blocksds_create_dsl)
 
     ## Return convenient values to the caller.
     # Path to the ELF file used to create the DSL.
-	set(${CREATE_DSL_TARGET}_ELF ${_elf} PARENT_SCOPE)
+	set(${DSL_TARGET}_ELF ${_elf} PARENT_SCOPE)
     # Path to the DSL file.
-	set(${CREATE_DSL_TARGET}_DSL ${_dsl} PARENT_SCOPE)
+	set(${DSL_TARGET}_DSL ${_dsl} PARENT_SCOPE)
     # Name of the DSL target.
-	set(${CREATE_DSL_TARGET}_DSL_TARGET ${_dsl_target} PARENT_SCOPE)
+	set(${DSL_TARGET}_DSL_TARGET ${_dsl_target} PARENT_SCOPE)
 endfunction()
